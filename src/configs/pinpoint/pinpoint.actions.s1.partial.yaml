@@ -1,0 +1,109 @@
+actions:
+  - actionId: list_jobs
+    label: List Jobs
+    categories:
+      - ats
+    actionType: list
+    description: Retrieves a paginated list of all jobs in your Pinpoint ATS organization. Use this endpoint to sync job postings to external job boards, build recruitment dashboards, or display open positions on your careers page. Supports filtering by visibility status and job status.
+    resources: https://developers.pinpointhq.com/reference/get-jobs
+    entrypointUrl: /jobs
+    entrypointHttpMethod: get
+    inputs:
+      - name: page_number
+        description: Page number for pagination (starts at 1).
+        type: number
+        in: query
+        required: false
+      - name: page_size
+        description: Number of jobs to return per page (default 25, max 100).
+        type: number
+        in: query
+        required: false
+      - name: visibility
+        description: Filter jobs by visibility status. Comma-separated values allowed (external, internal, confidential, private_job).
+        type: string
+        in: query
+        required: false
+      - name: status
+        description: Filter jobs by status (draft, pending_approval, open, closed, archived).
+        type: string
+        in: query
+        required: false
+    steps:
+      - stepId: fetch_jobs
+        description: Fetch jobs from Pinpoint API
+        stepFunction:
+          functionName: request
+          parameters:
+            url: /jobs
+            method: get
+            args:
+              - name: X-API-KEY
+                value: $.credentials.apiKey
+                in: headers
+              - name: Accept
+                value: application/vnd.api+json
+                in: headers
+              - name: page[number]
+                value: $.inputs.page_number
+                in: query
+                condition: "{{present(inputs.page_number)}}"
+              - name: page[size]
+                value: $.inputs.page_size
+                in: query
+                condition: "{{present(inputs.page_size)}}"
+              - name: filter[visibility]
+                value: $.inputs.visibility
+                in: query
+                condition: "{{present(inputs.visibility)}}"
+              - name: filter[status]
+                value: $.inputs.status
+                in: query
+                condition: "{{present(inputs.status)}}"
+            response:
+              collection: true
+    result:
+      data: $.steps.fetch_jobs.output.data
+
+  - actionId: update_application_status
+    label: Update Application Status
+    categories:
+      - ats
+    actionType: update
+    description: Updates the stage of an existing application in the hiring pipeline. Use this to move candidates through your recruitment workflow. Requires the application ID and the target stage ID.
+    resources: https://developers.pinpointhq.com/reference/put-application
+    entrypointUrl: /applications/:id
+    entrypointHttpMethod: put
+    inputs:
+      - name: id
+        description: Unique identifier of the application to update.
+        type: string
+        in: path
+        required: true
+      - name: stage_id
+        description: The ID of the stage to move the application to.
+        type: string
+        in: body
+        required: true
+    steps:
+      - stepId: update_application
+        description: Update application stage in Pinpoint API
+        stepFunction:
+          functionName: request
+          parameters:
+            url: /applications/${inputs.id}
+            method: put
+            args:
+              - name: X-API-KEY
+                value: $.credentials.apiKey
+                in: headers
+              - name: Content-Type
+                value: application/vnd.api+json
+                in: headers
+              - name: stage_id
+                value: $.inputs.stage_id
+                in: body
+            response:
+              collection: false
+    result:
+      data: $.steps.update_application.output.data

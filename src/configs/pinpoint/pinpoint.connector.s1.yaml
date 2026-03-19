@@ -1,0 +1,45 @@
+StackOne: 1.0.0
+info:
+  title: Pinpoint (Demo)
+  key: pinpoint_demo
+  version: 1.0.0
+  assets:
+    icon: https://stackone-logos.com/api/pinpoint/filled/png
+  description: Pinpoint is an all-in-one applicant tracking system (ATS) designed for ambitious teams, providing tools for job posting, candidate management, interview scheduling, and hiring analytics.
+
+baseUrl: https://${credentials.subdomain}.pinpointhq.com/api/v1
+
+authentication:
+  - custom:
+      type: custom
+      label: API Key
+      support:
+        link: https://developers.pinpointhq.com/docs/authentication
+        description: Generate an API key from your Pinpoint admin panel at Settings > Integrations > Pinpoint API.
+      authorization:
+        type: bearer
+        token: $.credentials.apiKey
+      configFields:
+        - key: subdomain
+          label: Subdomain
+          type: text
+          required: true
+          secret: false
+          placeholder: your-company
+          description: Your Pinpoint subdomain (the part before .pinpointhq.com in your Pinpoint URL).
+          tooltip: Find this in your browser URL when logged into Pinpoint.
+        - key: apiKey
+          label: API Key
+          type: password
+          required: true
+          secret: true
+          placeholder: pk_xxxxxxxxxxxxx
+          description: Generate an API key from Settings > Integrations > Pinpoint API in your Pinpoint admin panel. Ensure the key has appropriate permissions.
+          tooltip: Keep your API key secure and do not share it publicly.
+      environments:
+        - key: production
+          name: Production
+
+resources: "Pinpoint API documentation (https://developers.pinpointhq.com/docs/introduction)"
+
+$ref: pinpoint.actions

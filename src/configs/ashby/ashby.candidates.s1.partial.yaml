@@ -4,7 +4,7 @@ actions:
     categories:
       - ats
     actionType: get
-    description: List all candidates in the organization with optional pagination support
+    description: Retrieves a paginated list of all candidates in your Ashby ATS organization. Use this endpoint to sync candidate data to external systems, build recruitment dashboards, or populate candidate selection interfaces. Supports cursor-based pagination and incremental sync via syncToken for efficient data synchronization. Returns candidate profiles including contact information, current status, and metadata.
     resources: https://developers.ashbyhq.com/reference/candidatelist
     entrypointUrl: /candidate.list
     entrypointHttpMethod: post

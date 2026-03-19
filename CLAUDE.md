@@ -314,6 +314,296 @@ After testing `list_employees` with OAuth2, update: `"tested": true`, `"test_res
 
 **CRITICAL:** You MUST test every operation with EVERY auth type supported by the provider. Partial testing is NOT acceptable.
 
+### Systematic Action Testing Workflow
+
+**Purpose:** Test and fix ALL actions through iterative cycles until 100% working.
+
+#### Step 1: Prepare Action Tracking List
+
+Before testing begins, create a comprehensive tracking list of ALL actions in the connector:
+
+**Tracking Structure (JSON file: `/tmp/<provider>_action_testing.json`):**
+
+```json
+{
+  "provider": "provider_name",
+  "total_actions": 15,
+  "tested_count": 0,
+  "passed_count": 0,
+  "actions": [
+    {
+      "actionName": "list_employees",
+      "actionType": "LIST",
+      "tested": false,
+      "passed": false,
+      "comments": "",
+      "auxiliaryFor": [],
+      "capturedData": {}
+    },
+    {
+      "actionName": "get_employee",
+      "actionType": "GET",
+      "tested": false,
+      "passed": false,
+      "comments": "",
+      "auxiliaryFor": [],
+      "capturedData": {}
+    }
+  ]
+}
+```
+
+**Columns Explained:**
+
+- **actionName** - The operation/action ID from YAML
+- **actionType** - LIST, GET, CREATE, UPDATE, DELETE
+- **tested** - Boolean indicating if action has been tested
+- **passed** - Boolean indicating if action passed successfully
+- **comments** - Scenarios tested, special notes, or future testing requirements
+- **auxiliaryFor** - List of actions this action provides data for (e.g., list_employees provides IDs for get_employee)
+- **capturedData** - IDs or data captured during testing for use in dependent actions
+
+#### Step 2: Test Actions One-by-One (Sequential + Iterative)
+
+For EACH action in the tracking list:
+
+**A. Read Input Configuration First**
+
+Before testing ANY action, extract from YAML:
+
+```bash
+# Find and read action inputs
+grep -A 30 "actionId: <action_name>" provider.*.partial.yaml
+```
+
+**Extract:**
+- Required vs optional parameters (`required: true/false`)
+- Parameter locations (`in: path/query/body`)
+- Parameter types (`type: string/number/boolean`, `array: true`)
+
+**B. Prepare Input Parameters**
+
+Build params JSON based on input configuration:
+
+```json
+// Path params → {"path": {"id": "..."}}
+// Query params → {"query": {"max": 10, "filter": "active"}}
+// Body params → {"body": {"title": "...", "description": "..."}}
+// Mixed params → {"path": {"id": "..."}, "body": {"title": "..."}}
+```
+
+**Use captured data from auxiliary actions:**
+- If testing `get_employee`, use `employeeId` from `list_employees.capturedData`
+- If testing `update_room`, use `roomId` from `create_room.capturedData`
+
+**C. Test the Action Using CLI**
+
+```bash
+stackone run --connector provider.connector.s1.yaml \
+  --account account.json \
+  --credentials credentials.json \
+  --action-id <action_name> \
+  --params '<params_json>' \
+  [--debug]
+```
+
+**D. Handle Test Results**
+
+**✅ If Action PASSES:**
+
+1. Mark action as tested and passed in tracking list
+2. Capture any useful data (IDs, tokens, etc.) in `capturedData`
+3. Add test scenarios to `comments` field
+4. If this action provides data for other actions, mark it as auxiliary
+5. Update `tested_count++` and `passed_count++`
+
+**❌ If Action FAILS:**
+
+1. Analyze the error (400, 401, 404, 405, 500, etc.)
+2. Determine fix strategy (see Step 3)
+3. Apply fix to YAML configuration
+4. Re-test immediately
+5. Repeat until action passes OR is removed
+6. Update tracking list only after resolution
+
+**E. Mark Auxiliary Actions as Tested**
+
+If you use another action to get/set data for the target action:
+
+```json
+{
+  "actionName": "list_employees",
+  "tested": true,
+  "passed": true,
+  "comments": "Used to capture employee IDs for get_employee, update_employee, delete_employee",
+  "auxiliaryFor": ["get_employee", "update_employee", "delete_employee"],
+  "capturedData": {"employeeIds": ["123", "456", "789"]}
+}
+```
+
+#### Step 3: Fix Actions During Testing
+
+**When actions fail, apply fixes immediately using these resources:**
+
+**A. Error-Based Fix Strategy:**
+
+| Error | Root Cause | Fix Action | Reference |
+|-------|-----------|------------|-----------|
+| **400 Bad Request** | Missing/wrong params | Read inputs config, fix parameter structure/type/location | `src/configs/README.md` (inputs section) |
+| **401/403 Forbidden** | Missing auth scope | Add scope to credentials or document as admin-only | Similar connectors with same auth |
+| **404 Not Found** | Invalid endpoint | Check provider API docs, fix URL or REMOVE action | Provider API documentation |
+| **405 Method Not Allowed** | Wrong HTTP method | Check provider docs, fix method or REMOVE action | Provider API documentation |
+| **500 Server Error** | Invalid request format | Check request body/headers, compare with working actions | Similar actions in same connector |
+| **Invalid action inputs** | Config mismatch | Re-read inputs config, fix mappings | `src/configs/README.md` |
+
+**B. Fix Resources (Use in Order):**
+
+1. **`src/configs/README.md`** - Complete YAML structure, inputs, steps, authentication patterns
+2. **Similar connectors** - Find connectors with same auth type or similar structure
+3. **Provider API documentation** - Verify endpoints, methods, parameters
+4. **Working actions in same connector** - Copy patterns from successful actions
+5. **`src/configs/DEVELOPERS.md`** - Troubleshooting and debugging
+
+**C. Fix Examples:**
+
+```yaml
+# FIX: Missing required parameter
+# BEFORE (fails with 400)
+inputs:
+  - name: roomId
+    in: query  # WRONG LOCATION
+
+# AFTER (works)
+inputs:
+  - name: roomId
+    in: path  # CORRECT LOCATION
+    required: true
+```
+
+**D. When to Remove Actions:**
+
+- Endpoint doesn't exist (404 Not Found + verified in docs)
+- Method not supported (405 Method Not Allowed + verified in docs)
+- Endpoint deprecated/removed by provider
+- Requires unavailable scope that cannot be obtained
+
+**Update tracking list:**
+```json
+{
+  "actionName": "list_workspaces",
+  "tested": true,
+  "passed": false,
+  "comments": "REMOVED - Endpoint deprecated by provider, returns 404"
+}
+```
+
+#### Step 4: Continue Testing in Cycles
+
+**Cycle-Based Testing (Dependency Order):**
+
+**Cycle 1: LIST Actions (No Dependencies)**
+- Test all LIST actions first
+- Capture IDs, tokens, or other data needed by other actions
+- Mark as auxiliary for dependent actions
+- Example: `list_employees` → captures `employeeIds`
+
+**Cycle 2: GET Actions (Use IDs from Cycle 1)**
+- Test GET actions using IDs from LIST actions
+- Verify individual resource retrieval
+- Example: `get_employee` using `employeeId` from `list_employees`
+
+**Cycle 3: CREATE Actions (Generate New Resources)**
+- Test CREATE actions to generate new resources
+- Capture new IDs for UPDATE/DELETE actions
+- Example: `create_room` → captures `newRoomId`
+
+**Cycle 4: UPDATE Actions (Use IDs from Cycle 3)**
+- Test UPDATE actions using IDs from CREATE actions
+- Verify modifications work correctly
+- Example: `update_room` using `roomId` from `create_room`
+
+**Cycle 5: DELETE Actions (Clean Up from Cycle 3)**
+- Test DELETE actions using IDs from CREATE actions
+- Clean up test data
+- Example: `delete_room` using `roomId` from `create_room`
+
+**Continue cycles until:**
+- ✅ All actions have `tested: true` in tracking list
+- ✅ All actions either `passed: true` OR removed from YAML
+- ✅ `tested_count === total_actions`
+- ✅ `passed_count === total_actions` (excluding removed)
+- ✅ Zero actions with `tested: false` remaining
+
+#### Step 5: Update Tracking List After Each Action
+
+**MANDATORY:** Update `/tmp/<provider>_action_testing.json` immediately after testing EACH action.
+
+**Example Update:**
+
+```json
+{
+  "actionName": "get_employee",
+  "actionType": "GET",
+  "tested": true,
+  "passed": true,
+  "comments": "Tested with employeeId from list_employees. Successfully retrieves employee details including name, email, department.",
+  "auxiliaryFor": [],
+  "capturedData": {}
+}
+```
+
+**Track Progress:**
+
+```bash
+# Check completion status
+cat /tmp/<provider>_action_testing.json | jq '{total: .total_actions, tested: .tested_count, passed: .passed_count}'
+
+# List remaining untested actions
+cat /tmp/<provider>_action_testing.json | jq '.actions[] | select(.tested == false) | .actionName'
+```
+
+### Quick CLI Reference
+
+```bash
+# Test LIST action (query params)
+stackone run --connector provider.connector.s1.yaml --account account.json \
+  --credentials oauth2_creds.json --action-id list_employees \
+  --params '{"query":{"max":10}}'
+
+# Test GET action (path params)
+stackone run --connector provider.connector.s1.yaml --account account.json \
+  --credentials oauth2_creds.json --action-id get_employee \
+  --params '{"path":{"employeeId":"123"}}'
+
+# Test CREATE action (body params)
+stackone run --connector provider.connector.s1.yaml --account account.json \
+  --credentials oauth2_creds.json --action-id create_room \
+  --params '{"body":{"title":"New Room"}}'
+
+# Test UPDATE action (path + body params)
+stackone run --connector provider.connector.s1.yaml --account account.json \
+  --credentials oauth2_creds.json --action-id update_room \
+  --params '{"path":{"roomId":"abc"},"body":{"title":"Updated"}}'
+
+# Debug mode for troubleshooting
+stackone run --connector provider.connector.s1.yaml --account account.json \
+  --credentials oauth2_creds.json --action-id list_employees --debug
+```
+
+### Parameter Format Quick Reference
+
+| Action Type | Location | Example JSON |
+|-------------|----------|--------------|
+| **LIST** | `query` | `{"query":{"max":10,"filter":"active"}}` |
+| **GET** | `path` | `{"path":{"userId":"123"}}` |
+| **CREATE** | `body` | `{"body":{"title":"New","description":"..."}}` |
+| **UPDATE** | `path` + `body` | `{"path":{"id":"123"},"body":{"name":"Updated"}}` |
+| **DELETE** | `path` | `{"path":{"id":"123"}}` |
+
+---
+
+### Testing Methods (Detailed)
+
 **Testing Methods:** You can test operations using either:
 
 1. **Async Tool (Recommended for batch testing):** Use `test_actions()` tool which executes `stackone run ...` CLI commands. Requires polling `get_test_actions_task_status()` until completion.
@@ -427,32 +717,6 @@ stackone run --connector provider.connector.s1.yaml --account account.json \
 5. Verify action names match YAML exactly (case-sensitive)
 6. Check params match operation's `inputs` schema
 7. Clean up credential files after testing (use `scramble_credentials()`)
-
-**Partial Files & References (Quick Guide)**
-
-File Extensions:
-
-- Main: .s1.yaml
-- Partial: .s1.partial.yaml
-
-Usage:
-
-# In main file (myconnector.main.s1.yaml)
-
-$ref: 'myconnector.authentication'
-
-# Partial file (myconnector.authentication.s1.partial.yaml)
-
-authentication: - oauth2:
-type: oauth2
-label: OAuth 2.0
-
-Rules:
-
-- Omit .s1.partial.yaml extension in $ref
-- Partials must be in same directory as main file
-- SDK auto-resolves references during load
-- Works with all CLI commands (validate/push/run)
 
 ### Testing Execution (STRICT REQUIREMENTS)
 
@@ -776,4 +1040,5 @@ A successful Falcon configuration delivers:
 
 - **YAML Structure & Connector Building:** `src/configs/README.md`
 - **TypeScript to YAML Conversion:** `src/configs/YAMLCONVERSION.md`
+- **Environment Setup & Troubleshooting:** `src/configs/DEVELOPERS.md`
 - **Git Branching & Commit Format:** `README.md`
